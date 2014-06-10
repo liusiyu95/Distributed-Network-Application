@@ -1,0 +1,179 @@
+package transmitter;
+
+import java.io.InterruptedIOException;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.util.Random;
+
+public class TransmitData {
+	// ---------------------fields------------------------//
+	// set maximum packet size
+	private final int MPS = 30;
+	// length of header
+	private final int HEADER_LEN = 8;
+	// length of received packet
+	private final int RCV_LEN = 8;
+	// type location in the received byte packet
+	private final int TYPE_LOC = 0;
+	// acknowledge number location in the received byte packet
+	private final int ACK_NUM_LOC = 2;
+	// buffer size location in the received byte packet
+	private final int BUF_SIZ_LOC = 6;
+	// server port number
+	private final int SERVER_PORT_NUM = 9999;
+	// timeout initial value in milliseconds
+	private final int TIMEOUT_INIT_VAL_MS = 1000;
+	// the total length of sent message size
+	private int sentMsgSize;
+	// the whole sent message
+	private byte[] sentMessage;
+
+	// type value in sent packet
+	private int type;
+	// sequence number in sent packet
+	private int seqNum;
+	// next expected sent sequence number
+	private int nextSeqNum;
+	// length of payload
+	private int pLen;
+	// checksum of sent packet
+	private short checksum;
+	// total length of sent packet
+	private int bufSize;
+	// timeout value
+	private int timeout;
+	// timeout counter
+	private int timerCnt;
+
+	// ---------------------public methods------------------------//
+	// constructor
+	public TransmitData(int maxSentMsg) {
+		sentMsgSize = maxSentMsg;
+	}
+
+	// main process of transmitter
+	public void process() throws Exception {
+		// initiate the sent packet and generate the random sent message
+		init();
+		// create the UDP client socket
+		DatagramSocket senderSocket = new DatagramSocket();
+		do {
+			// if this is the last packet
+			if (seqNum + pLen > sentMsgSize) {
+				// type of the sent packet is 0001h
+				type = 1;
+				// payload length should equal to numbers of bytes which have
+				// not been sent yet
+				pLen = sentMsgSize - seqNum;
+				// length of packet equal to header length plus payload length
+				bufSize = HEADER_LEN + pLen;
+			}
+			// create sent packet
+			byte[] sentDatagram = new byte[bufSize];
+			DataPacket sentDataPck = new DataPacket(bufSize, type, seqNum, pLen, checksum, sentMessage);
+			sentDatagram = sentDataPck.getDataPacket();
+
+			// set next sequence number
+			nextSeqNum = seqNum + pLen;
+
+			// providing the server's IP address
+			 byte[] serverIpAddress = new byte[]{ 192-256, 168-256, 1, 9 }; //corresponds to 192.168.1.9 (byte is signed type!)
+			 InetAddress server = InetAddress.getByAddress(serverIpAddress);
+
+			// create the UDP packet to be sent
+			DatagramPacket sentPacket = new DatagramPacket(sentDatagram, sentDatagram.length, server, SERVER_PORT_NUM);
+			do {
+				// send the UDP packet to the server
+				senderSocket.send(sentPacket);
+				//create the receive UDP packet
+				byte[] rcvDatagram = new byte[RCV_LEN];
+				DatagramPacket receivePacket = new DatagramPacket(rcvDatagram, rcvDatagram.length);
+				//set the timeout for the socket
+				senderSocket.setSoTimeout(timeout);
+				
+				//receive the server's response
+				try {
+					//the timeout timer starts ticking here
+					senderSocket.receive(receivePacket);
+
+					//calculate the checksum of entire acknowledgment packet
+					Checksum rcvChecksum = new Checksum(rcvDatagram);
+					short invcheckACK = rcvChecksum.getChecksum();
+					short checkACK = (short) ~invcheckACK;
+					// whether it is all one
+					if (checkACK != -1) {
+						//if not, throw an exception
+						System.out.println("Checking the checksum...value is" + checkACK);
+						throw new InterruptedIOException(
+								"The checksum calculated over the entire acknowledgment packet is not all one!");
+					}
+
+					//get the type of received packet
+					int ackType = rcvDatagram[TYPE_LOC] * 256 + rcvDatagram[TYPE_LOC + 1];
+					// whether the type is 0002h
+					if (ackType != 2) {
+						//if not, throw an exception
+						System.out.println("Received ACK type is " + ackType);
+						throw new InterruptedIOException("Unknown type code!");
+					}
+
+					//get the acknowledgment number of received packet
+					int ackNum_H = rcvDatagram[ACK_NUM_LOC] < 0 ? rcvDatagram[ACK_NUM_LOC] + 256 : rcvDatagram[ACK_NUM_LOC];
+					int ackNum_L = rcvDatagram[ACK_NUM_LOC + 1] < 0 ? rcvDatagram[ACK_NUM_LOC + 1] + 256 : rcvDatagram[ACK_NUM_LOC + 1];
+					int ackNum = ackNum_H * 256 + ackNum_L;
+					// whether the acknowledgment number is correct
+					if (ackNum != nextSeqNum) {
+						System.out.println("Expected ACK number is " + nextSeqNum);
+						System.out.println("Received ACK number is " + ackNum);
+						//if not, throw an exception
+						throw new InterruptedIOException("The acknowledgement number is not correct!");
+					}
+
+					//if one packet transmitted successfully, reset the timeout value
+					timeout = TIMEOUT_INIT_VAL_MS;
+					//reset the timeout count
+					timerCnt = 0;
+					//sent the total length of next packet
+					bufSize = rcvDatagram[BUF_SIZ_LOC] * 256 + rcvDatagram[BUF_SIZ_LOC + 1];
+					//set the sequence number of next packet
+					seqNum = nextSeqNum;
+					//set the payload length of next packet
+					pLen = bufSize - HEADER_LEN;
+				} catch (InterruptedIOException e) {
+					//timeout, the value of timeout double, increase the count number
+					timeout *= 2;
+					timerCnt++;
+					System.out.println("Timeout count: " + timerCnt);
+					System.out.println("Retransmitting...");
+					//whether it is the fourth timeout event
+					if (timerCnt == 4) {
+						System.out.println("Communication failure! Exception object e: " + e);
+						System.exit(0);
+					}
+				}
+			} while (timerCnt > 0 && timerCnt < 4);//timeout happened and continuous timeout less than 4 times, retransmit
+		} while (seqNum < sentMsgSize);//transmit the data until all bytes in the whole sent message have been transmitted
+		System.out.println("Success!");
+		//close the socket
+		senderSocket.close();
+	}
+
+	// ---------------------private methods------------------------//
+	//initiate the first sent packet
+	private void init() {
+		type = 0;//still have data to send
+		seqNum = 0;//point to the first byte
+		nextSeqNum = 0;//point to the next sent byte
+		pLen = MPS - HEADER_LEN;//set the length of payload
+		checksum = 0;//clear the checksum
+		bufSize = MPS;//set the length of first packet 
+		timeout = TIMEOUT_INIT_VAL_MS;//set timeout to initial value
+		timerCnt = 0;//no timeout
+
+		// create random message bytes
+		sentMessage = new byte[sentMsgSize];
+		Random a = new Random();
+		a.nextBytes(sentMessage);
+	}
+}
