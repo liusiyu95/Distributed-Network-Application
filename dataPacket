@@ -1,0 +1,79 @@
+package transmitter;
+
+public class DataPacket {
+
+	//--------------------fields---------------------//
+	//type location in the sent byte packet
+	private final int TYPE_LOC = 0;
+	//sequence number location in the sent byte packet
+	private final int SEQ_NUM_LOC = 2;
+	//checksum location in the sent byte packet
+	private final int CHECKSUM_LOC = 4;
+	//payload length location in the sent byte packet
+	private final int PAYLOAD_LEN_LOC = 6;
+	//data location in the sent byte packet
+	private final int DATA_LOC = 8;
+	
+	//type value in sent packet
+	private int type;
+	//sequence number of sent packet
+	private int seqNum;
+	//length of payload
+	private int pLen;
+	//checksum of sent packet
+	private short checksum;
+	//total length of sent packet
+	private int bufSize;
+	//the whole sent message
+	private byte[] sentMsg;
+	//each data packet
+	private byte[] dataPacket;
+	
+	//---------------public methods------------------//
+	//constructor
+	public DataPacket(int mbufSize, int mtype, int mseqNum, int mpLen, short mchecksum, byte[] msentMsg){
+		bufSize = mbufSize;
+		type = mtype;
+		seqNum = mseqNum;
+		pLen = mpLen;
+		checksum = mchecksum;
+		sentMsg = msentMsg;
+	}
+	
+	//accessor
+	public byte[] getDataPacket(){
+		dataPacket = formData();
+		return dataPacket;
+	}
+		
+	
+	//---------------private methods-----------------//
+	//form the data packet
+	private byte[] formData(){
+		dataPacket = new byte[bufSize];
+		//initiate type
+		transIntToArray(TYPE_LOC, type);
+		//initiate sequence number
+		transIntToArray(SEQ_NUM_LOC, seqNum);
+		//initiate payload length
+		transIntToArray(PAYLOAD_LEN_LOC, pLen);
+		//initiate data
+		for(int i = 0;i < pLen; i++){
+			dataPacket[DATA_LOC + i] = sentMsg[seqNum+i];
+		}	
+		//initiate checksum
+		transIntToArray(CHECKSUM_LOC, checksum);
+		Checksum dataChecksum = new Checksum(dataPacket);	
+		checksum = dataChecksum.getChecksum();
+		transIntToArray(CHECKSUM_LOC, checksum);
+		return dataPacket;
+	}
+	
+	//converting int to byte
+	private void transIntToArray(int location, int content){
+		dataPacket[location] = (byte)(content>>>8);
+		dataPacket[location+1] = (byte)(content&0xff);
+	}
+	
+
+}
