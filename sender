@@ -1,0 +1,14 @@
+package transmitter;
+
+
+public class Sender {	
+	public static void main(String[] args) throws Exception {
+		// TODO Auto-generated method stub
+		//sent message size in type
+		final int SENT_MSG_SIZE = 500;
+		TransmitData transmit = new TransmitData(SENT_MSG_SIZE);
+		//execute the transmit process
+		transmit.process();
+	}
+}
+
