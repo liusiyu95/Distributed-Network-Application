@@ -1,0 +1,56 @@
+package receiver;
+
+public class Checksum {
+
+	//--------------------fields---------------------//
+	private byte[] data;
+	private byte[] checksum;
+
+	//---------------public methods------------------//
+	
+	//constructor
+	public Checksum(byte[] a) {
+		data = a;
+	}
+
+	//accessor
+	public byte[] getChecksum(int length) {
+		checksum = CheckSumMethod(data, length);
+		return checksum;
+	}
+	
+	//--------------private methods------------------//
+	//calculate the value of checksum
+	private byte[] CheckSumMethod(byte[] data, int length) {
+		int sum = 0;
+		short sum1 = 0;
+		byte[] result = new byte[2];
+		if (length % 2 == 0) {
+
+			for (int i = 0; i < length; i += 2) {
+				// form and sum the 16bit integer
+				sum += (0x0000ff00 & (data[i] << 8))
+						+ (0x000000ff & data[i + 1]);
+			}
+
+		} else {
+			for (int i = 0; i < length - 1; i += 2) {
+				// form and sum the 16bit integer
+				sum += (0x0000ff00 & (data[i] << 8))
+						+ (0x000000ff & data[i + 1]);
+			}
+			sum += 0x0000ff00 & (data[length - 1] << 8);
+
+		}
+		// add left-over byte, if any
+		while (sum >>> 16 != 0) {
+			sum = (sum >>> 16) + (sum & 0x0000ffff);
+		}
+		sum1 = (short) ~sum;
+
+		result[0] = (byte) (sum1 >>> 8);
+		result[1] = (byte) (sum1 & 0x00ff);
+
+		return result;
+	}
+}
