@@ -1,0 +1,162 @@
+package receiver;
+
+import java.io.IOException;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.net.SocketException;
+import java.util.Random;
+
+public class ReceiverBody {
+	//--------------------fields---------------------//
+	// the type of packet MSB
+	private final byte PACKETTYPE_MSB = 0x00;
+	// the type of packet LSB
+	private final byte PACKETTYPE_LSB = 0x02;
+	// the port number
+	private final int SERVER_PORT_NUM = 9999;
+	// buffer size to store data from the sender
+	private final int MAX_MSG_SIZE = 500;
+	// packet size's initial value 30 bytes
+	private final int MPS = 30;
+	private int ACK_num;
+	private int receive_Buffer = MPS;
+	// buffer for the whole 500 bytes
+	private byte[] totalReceived_Data = new byte[MAX_MSG_SIZE]; 
+	
+	//---------------public methods------------------//
+	
+	//constructor
+	public ReceiverBody(){
+		
+	}
+	
+	// main process of receiver body
+	public void process() throws SocketException{
+		// initial ACK packet 
+		byte[] ACK_DataPacket = new byte[8];
+		ACK_DataPacket[0] = PACKETTYPE_MSB;
+		ACK_DataPacket[1] = PACKETTYPE_LSB;
+		ACK_DataPacket[2] = 0;
+		ACK_DataPacket[3] = 0;
+		ACK_DataPacket[6] = 0;
+		ACK_DataPacket[7] = (byte) receive_Buffer;
+
+		// initial the first received packet
+		byte[] receivedData = new byte[receive_Buffer];
+		// Sender and Receiver UDP packet
+		DatagramPacket receiverPack = new DatagramPacket(ACK_DataPacket,
+				ACK_DataPacket.length);
+		DatagramPacket senderPack = new DatagramPacket(receivedData,
+				receivedData.length);
+
+		// Sender socket, listening on port number
+		DatagramSocket receiverSocket = new DatagramSocket(SERVER_PORT_NUM);
+
+		// Sender's IP address object
+		InetAddress senderAddress;
+
+		// do this forever
+		while (true) {
+			try {
+				// Receiving the Sender request
+				receiverSocket.receive(senderPack);
+				// getting the Sender info out of the received UDP packet object
+				receivedData = senderPack.getData();
+				senderAddress = senderPack.getAddress();
+				int SenderPort = senderPack.getPort();
+				int dataLength = senderPack.getLength();
+				// calculate the checksum for Sender packet
+				byte[] checkSum = new byte[2];
+				Checksum check_data=new Checksum(receivedData);
+				checkSum = check_data.getChecksum(dataLength);
+				// whether the entire Sender packet is 0
+				if (checkSum[0] == 0 && checkSum[1] == 0) {
+					// whether sequence number is equal to ACK number
+					if (receivedData[2] == ACK_DataPacket[2] && receivedData[3] == ACK_DataPacket[3]) {
+						//whether dataLength < = buffer size
+						if (dataLength <= receive_Buffer) {
+							// whether the header is 0000h or 0001h
+							if (receivedData[0] == 0x00
+									&& (receivedData[1] == 0x00 || receivedData[1] == 0x01)) {
+								// print out the received data
+								// change byte to int 
+								int receivedData2 = receivedData[2] >= 0 ? receivedData[2]
+										: receivedData[2] + 256;
+								int receivedData3 = receivedData[3] >= 0 ? receivedData[3]
+										: receivedData[3] + 256;
+								int sequenceNum = receivedData2 * 256
+										+ receivedData3;
+
+								// storing Received DataPacket
+								for (int i = 8; i < dataLength; i++) {
+									totalReceived_Data[i - 8 + sequenceNum] = receivedData[i];
+								}
+								byte[] check_sum = new byte[2];
+
+								// ACK #
+								ACK_num = receivedData[7] + receivedData2 * 256
+										+ receivedData3;
+								// ACK # MSB
+								ACK_DataPacket[2] = (byte) (ACK_num >>> 8);
+								// ACK # MSB
+								ACK_DataPacket[3] = (byte) (ACK_num & 0x000000ff);
+							   // Random Receive buffer size
+								Random random = new Random();
+								receive_Buffer = random.nextInt(30) % (16) + 15;
+								ACK_DataPacket[7] = (byte) receive_Buffer;
+
+								// calculate the checksum
+								ACK_DataPacket[4] = 0;
+								ACK_DataPacket[5] = 0;
+								Checksum check_ACK= new Checksum(ACK_DataPacket);
+								check_sum = check_ACK.getChecksum(ACK_DataPacket.length);
+								ACK_DataPacket[4] = check_sum[0];
+								ACK_DataPacket[5] = check_sum[1];
+
+								// send ACK
+								receiverPack = new DatagramPacket(ACK_DataPacket, ACK_DataPacket.length, senderAddress, SenderPort);
+								receiverPack.setAddress(senderAddress);
+								receiverPack.setPort(SenderPort);
+								receiverPack.setLength(ACK_DataPacket.length);
+								receiverSocket.send(receiverPack);
+								if (ACK_num == MAX_MSG_SIZE) {
+									System.out.println("Received data packet is");
+									for (int i = 0; i < MAX_MSG_SIZE; i++) {
+										System.out.printf(" %6d: [%4d]",i,totalReceived_Data[i]);
+										if((i+1)%10==0){
+											System.out.printf("\n");
+										}
+									}
+									break;
+								}
+							}
+							else {
+								System.out.println("Sender packet type is: "+receivedData[1]);
+								System.out.println("Unknown type! It should be 0 or 1 ! ");
+							}
+						} else {
+							System.out.print("data length error! ");
+							System.out.println("The payload length should be: "+(ACK_DataPacket[7]-8));
+							System.out.println("The sender length:"+receivedData[7]);
+
+						}
+					} 
+					else {
+						System.out.println("ACK did not match! ");
+						receiverSocket.send(receiverPack);
+						System.out.println("Retransmit the last ACK packet");
+						System.out.println("ACK sequence number is " + ACK_num);
+					}
+
+				}
+				else {
+					System.out.print("checksum all one error! ");
+				}
+
+			}catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
+	}
+}
